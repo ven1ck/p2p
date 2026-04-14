@@ -18,10 +18,19 @@ class TransferGUI:
 
     def __init__(self):
         self.root = TkinterDnD.Tk()
-        self.root.title("Передача файлов по локальной сети")
+        self.root.title("ОтправочкаP2P")
         self.root.geometry("950x650")
-        self.root.minsize(750, 500)
+        self.root.minsize(650, 500)
         self.root.configure(bg='black')
+
+        logo_png = os.path.join(os.path.dirname(__file__), "img/logo.png")
+        logo_ico = os.path.join(os.path.dirname(__file__), "img/logo.ico")
+
+        if os.path.exists(logo_png):
+            icon = tk.PhotoImage(file=logo_png)
+            self.root.iconphoto(True, icon)
+        elif os.path.exists(logo_ico):
+            self.root.iconbitmap(logo_ico)
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -81,8 +90,8 @@ class TransferGUI:
         # Ряд 1: Добавление
         btn_add_frame = ctk.CTkFrame(file_col, fg_color="transparent")
         btn_add_frame.pack(fill="x", padx=10, pady=(0, 5))
-        ctk.CTkButton(btn_add_frame, text="Добавить файлы...", command=self._add_files, width=120).pack(side="left", padx=2)
-        ctk.CTkButton(btn_add_frame, text="Добавить папку...", command=self._add_folder, width=120).pack(side="left", padx=2)
+        ctk.CTkButton(btn_add_frame, text="Добавить файлы", command=self._add_files, width=120).pack(side="left", padx=2)
+        ctk.CTkButton(btn_add_frame, text="Добавить папку", command=self._add_folder, width=120).pack(side="left", padx=2)
 
         # Ряд 2: Очистка (теперь во всю ширину, как кнопка отправки)
         btn_clear_frame = ctk.CTkFrame(file_col, fg_color="transparent")
