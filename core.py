@@ -10,12 +10,7 @@ from datetime import datetime
 class FileTransferCore:
     """
     Ядро приложения.
-    Протокол TCP (пакетный режим):
-      1. Клиент отправляет кол-во элементов (4 байта).
-      2. Клиент отправляет метаданные каждого элемента: длина_относительного_пути(4) + путь(N) + размер(8).
-      3. Сервер собирает метаданные, запрашивает ЕДИНОЕ РАЗРЕШЕНИЕ у GUI.
-      4. GUI возвращает 1 байт (0x01 - принять всё, 0x00 - отклонить всё).
-      5. Если принято, клиент последовательно отправляет данные. Сервер воссоздаёт структуру папок.
+    Протокол TCP (пакетный режим) + UDP-обнаружение с автоочисткой неактивных узлов.
     """
 
     def __init__(self, tcp_port=9999, udp_port=50000, recv_dir="./received"):
@@ -34,11 +29,11 @@ class FileTransferCore:
         
         self._peers_lock = threading.Lock()
         self.peers = []
+        self._peer_last_seen = {}  # ip -> timestamp
         
         os.makedirs(self.recv_dir, exist_ok=True)
 
     def _get_local_ip(self):
-        """Определяет локальный IP-адрес машины."""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -49,7 +44,6 @@ class FileTransferCore:
             return "127.0.0.1"
 
     def start(self):
-        """Запускает TCP-сервер и UDP-обнаружение в фоновых потоках."""
         threading.Thread(target=self._run_tcp_server, daemon=True).start()
         threading.Thread(target=self._run_discovery, daemon=True).start()
         self._log("Сервер и обнаружение запущены.")
@@ -68,7 +62,6 @@ class FileTransferCore:
                 break
 
     def _handle_incoming(self, client_sock, addr):
-        """Принимает пакет метаданных, ждёт общего разрешения, сохраняет файлы."""
         try:
             num_files = struct.unpack("!I", self._recv_exact(client_sock, 4))[0]
             batch_meta = []
@@ -92,7 +85,6 @@ class FileTransferCore:
             })
             self._log(f"Входящий пакет: {num_files} элемент(ов) от {addr[0]}")
 
-            # Ожидание решения пользователя (120 сек)
             if not evt.wait(timeout=120):
                 self._log(f"Таймаут запроса от {addr[0]}")
                 client_sock.sendall(b'\x00')
@@ -106,14 +98,12 @@ class FileTransferCore:
                 for meta in batch_meta:
                     filepath = os.path.join(self.recv_dir, meta["path"])
                     d = os.path.dirname(filepath)
-                    if d:
-                        os.makedirs(d, exist_ok=True)
+                    if d: os.makedirs(d, exist_ok=True)
                     with open(filepath, "wb") as f:
                         received = 0
                         while received < meta["size"]:
                             chunk = client_sock.recv(min(4096, meta["size"] - received))
-                            if not chunk:
-                                raise ConnectionError("Соединение разорвано во время получения")
+                            if not chunk: raise ConnectionError("Соединение разорвано")
                             f.write(chunk)
                             received += len(chunk)
                     self._log(f"Сохранён: {meta['path']}")
@@ -127,18 +117,15 @@ class FileTransferCore:
             client_sock.close()
 
     def _recv_exact(self, sock, n):
-        """Гарантирует чтение ровно n байт из TCP-потока."""
         data = bytearray()
         while len(data) < n:
             chunk = sock.recv(n - len(data))
-            if not chunk:
-                raise ConnectionError("Соединение закрыто")
+            if not chunk: raise ConnectionError("Соединение закрыто")
             data.extend(chunk)
         return bytes(data)
 
     # ================= ОТПРАВКА =================
     def _flatten_items(self, paths):
-        """Преобразует список файлов/папок в плоский список (abs_path, rel_path, size)."""
         items = []
         for p in paths:
             p = os.path.normpath(p)
@@ -162,7 +149,6 @@ class FileTransferCore:
         return True, f"Начата отправка пакета ({len(items)} элемент(ов))..."
 
     def _send_worker(self, host, port, items):
-        """Отправляет пакет элементов по одному TCP-соединению."""
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(10)
@@ -184,8 +170,7 @@ class FileTransferCore:
                 with open(abs_path, "rb") as f:
                     while True:
                         chunk = f.read(4096)
-                        if not chunk:
-                            break
+                        if not chunk: break
                         sock.sendall(chunk)
             self._log(f"Пакет успешно отправлен на {host}")
         except Exception as e:
@@ -229,14 +214,24 @@ class FileTransferCore:
 
     def _add_peer(self, name, ip, port):
         with self._peers_lock:
+            updated = False
             for p in self.peers:
                 if p["ip"] == ip:
                     p.update({"name": name, "port": port})
-                    return
-            self.peers.append({"name": name, "ip": ip, "port": port})
+                    updated = True
+                    break
+            if not updated:
+                self.peers.append({"name": name, "ip": ip, "port": port})
+            self._peer_last_seen[ip] = time.time()
 
     def get_peers(self):
+        current_time = time.time()
         with self._peers_lock:
+            # Удаляем узлы, от которых не было пакетов более 10 сек (5 пропусков по 2 сек)
+            stale_ips = [ip for ip, ts in self._peer_last_seen.items() if current_time - ts > 10]
+            for ip in stale_ips:
+                self.peers = [p for p in self.peers if p["ip"] != ip]
+                del self._peer_last_seen[ip]
             return list(self.peers)
 
     # ================= УПРАВЛЕНИЕ =================
@@ -249,7 +244,6 @@ class FileTransferCore:
         return True, "Имя обновлено."
 
     def respond_to_transfer(self, req_id, accept):
-        """Вызывается GUI для передачи решения пользователя."""
         with self._req_lock:
             if req_id in self.pending_requests:
                 self.pending_requests[req_id]["accepted"] = accept
@@ -262,5 +256,4 @@ class FileTransferCore:
         return f"{size_bytes/1024**3:.2f} ГБ"
 
     def _log(self, msg):
-        """Добавляет сообщение в очередь логов для GUI."""
         self.log_queue.put(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")

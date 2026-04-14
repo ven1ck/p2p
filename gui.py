@@ -1,4 +1,3 @@
-# КРИТИЧНО: Порядок импортов определяет работу tkinterdnd2 + customtkinter
 import tkinter as tk
 from tkinterdnd2 import TkinterDnD, DND_FILES
 import customtkinter as ctk
@@ -11,10 +10,10 @@ from core import FileTransferCore
 class TransferGUI:
     """
     Графический интерфейс полностью на customtkinter.
-    - Списки реализованы через CTkScrollableFrame + динамические виджеты
-    - Drag & Drop зарегистрирован на главном окне и области списка файлов
-    - Потокобезопасное обновление через polling
-    - Пакетное разрешение, поддержка папок, русский язык
+    - Жёстко зафиксирована только тёмная тема
+    - Кнопка очистки выровнена по размеру с кнопкой отправки
+    - Порт скрыт в списке пользователей
+    - Drag & Drop без отладочных логов
     """
 
     def __init__(self):
@@ -24,16 +23,16 @@ class TransferGUI:
         self.root.minsize(750, 500)
         self.root.configure(bg='black')
 
-        ctk.set_appearance_mode("system")
+        ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
         self.core = FileTransferCore()
         self.core.start()
         self.selected_paths = []
         
-        # Хранилища виджетов для эффективного обновления без мерцания
-        self.peer_checkboxes = {}  # ip -> CTkCheckBox
-        self.file_frames = {}      # path -> CTkFrame (строка с файлом)
+        self.peer_checkboxes = {}
+        self.file_frames = {}
+        self.select_all_var = tk.BooleanVar(value=False)
 
         self._setup_ui()
         self._init_drag_drop()
@@ -46,7 +45,6 @@ class TransferGUI:
         self.root.mainloop()
 
     def _setup_ui(self):
-        # 1. Верхняя панель
         top_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         top_frame.pack(fill="x", padx=20, pady=(15, 5))
 
@@ -55,37 +53,47 @@ class TransferGUI:
         ctk.CTkEntry(top_frame, textvariable=self.name_var, width=200).pack(side="left", padx=2)
         ctk.CTkButton(top_frame, text="Применить", command=self._apply_name, width=90).pack(side="left")
 
-        # 2. Основная область (две колонки)
         main_frame = ctk.CTkFrame(self.root)
         main_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # ЛЕВАЯ КОЛОНКА: Пользователи
         peer_col = ctk.CTkFrame(main_frame)
         peer_col.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
         ctk.CTkLabel(peer_col, text="Обнаруженные пользователи", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
+        
+        self.select_all_cb = ctk.CTkCheckBox(
+            peer_col, text="Выбрать всех", variable=self.select_all_var, 
+            command=self._toggle_select_all_peers, font=ctk.CTkFont(size=12)
+        )
+        self.select_all_cb.pack(anchor="w", padx=10, pady=(0, 5))
+
         self.peer_scroll = ctk.CTkScrollableFrame(peer_col, label_text="")
         self.peer_scroll.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # ПРАВАЯ КОЛОНКА: Файлы и управление
         file_col = ctk.CTkFrame(main_frame)
         file_col.pack(side="right", fill="both", expand=True)
 
         ctk.CTkLabel(file_col, text="Элементы для отправки", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
         
-        # Список файлов (скроллируемый)
         self.file_scroll = ctk.CTkScrollableFrame(file_col, label_text="")
         self.file_scroll.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 
-        # Кнопки управления
-        path_btn_frame = ctk.CTkFrame(file_col, fg_color="transparent")
-        path_btn_frame.pack(fill="x", padx=10, pady=(0, 10))
-        ctk.CTkButton(path_btn_frame, text="Добавить файлы...", command=self._add_files, width=120).pack(side="left", padx=2)
-        ctk.CTkButton(path_btn_frame, text="Добавить папку...", command=self._add_folder, width=120).pack(side="left", padx=2)
-        ctk.CTkButton(path_btn_frame, text="Очистить всё", command=self._clear_paths, width=100).pack(side="left", padx=2)
-        ctk.CTkButton(path_btn_frame, text="Отправить выбранным", command=self._send_paths, width=150).pack(side="right", padx=2)
+        # Ряд 1: Добавление
+        btn_add_frame = ctk.CTkFrame(file_col, fg_color="transparent")
+        btn_add_frame.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkButton(btn_add_frame, text="Добавить файлы...", command=self._add_files, width=120).pack(side="left", padx=2)
+        ctk.CTkButton(btn_add_frame, text="Добавить папку...", command=self._add_folder, width=120).pack(side="left", padx=2)
 
-        # 3. Журнал событий
+        # Ряд 2: Очистка (теперь во всю ширину, как кнопка отправки)
+        btn_clear_frame = ctk.CTkFrame(file_col, fg_color="transparent")
+        btn_clear_frame.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkButton(btn_clear_frame, text="Очистить всё", command=self._clear_paths, height=40).pack(fill="x")
+
+        # Ряд 3: Отправка
+        btn_send_frame = ctk.CTkFrame(file_col, fg_color="transparent")
+        btn_send_frame.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkButton(btn_send_frame, text="Отправить выбранным", command=self._send_paths, height=40).pack(fill="x")
+
         log_frame = ctk.CTkFrame(self.root)
         log_frame.pack(fill="both", expand=True, padx=20, pady=(0, 15))
 
@@ -94,30 +102,27 @@ class TransferGUI:
         self.log_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
     def _init_drag_drop(self):
-        """Регистрация Drag & Drop на корневом окне и области списка файлов."""
         try:
             self.root.tk.eval('package require tkdnd 2.9')
-        except tk.TclError as e:
-            self.core._log(f"Библиотека tkdnd не загружена. DnD отключён. ({e})")
+        except tk.TclError:
             return
 
         if not hasattr(self.root, 'drop_target_register'):
-            self.core._log("Атрибут drop_target_register отсутствует.")
             return
 
         try:
-            # Регистрируем главное окно и область списка файлов
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind('<<Drop>>', self._on_drop)
-            
             self.file_scroll.drop_target_register(DND_FILES)
             self.file_scroll.dnd_bind('<<Drop>>', self._on_drop)
-            
-            self.core._log("Drag & Drop активирован (работает по всему окну).")
-        except Exception as e:
-            self.core._log(f"Сбой регистрации DnD: {e}")
+        except Exception:
+            pass
 
-    # ================= УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ =================
+    def _toggle_select_all_peers(self):
+        is_checked = self.select_all_var.get()
+        for cb in self.peer_checkboxes.values():
+            cb.select() if is_checked else cb.deselect()
+
     def _poll_peers(self):
         peers = self.core.get_peers()
         current_ips = set(self.peer_checkboxes.keys())
@@ -129,32 +134,32 @@ class TransferGUI:
 
         for p in peers:
             if p["ip"] not in self.peer_checkboxes:
+                # Порт больше не отображается в интерфейсе
                 cb = ctk.CTkCheckBox(
-                    self.peer_scroll, 
-                    text=f"{p['name']} ({p['ip']}:{p['port']})",
+                    self.peer_scroll, text=f"{p['name']} ({p['ip']})",
                     font=ctk.CTkFont(size=12)
                 )
                 cb.pack(anchor="w", padx=5, pady=2, fill="x")
                 self.peer_checkboxes[p["ip"]] = cb
+                if self.select_all_var.get():
+                    cb.select()
             else:
                 cb = self.peer_checkboxes[p["ip"]]
-                expected_text = f"{p['name']} ({p['ip']}:{p['port']})"
+                expected_text = f"{p['name']} ({p['ip']})"
                 if cb.cget("text") != expected_text:
                     cb.configure(text=expected_text)
 
         self.root.after(2000, self._poll_peers)
 
     def _get_selected_peers(self):
+        # Получаем актуальные порты из ядра
+        peers_data = {p["ip"]: p["port"] for p in self.core.get_peers()}
         targets = []
         for ip, cb in self.peer_checkboxes.items():
-            if cb.get() == 1:
-                text = cb.cget("text")
-                ip_port = text.split("(")[1].rstrip(")")
-                ip_addr, port = ip_port.split(":")
-                targets.append({"ip": ip_addr, "port": int(port)})
+            if cb.get() == 1 and ip in peers_data:
+                targets.append({"ip": ip, "port": peers_data[ip]})
         return targets
 
-    # ================= УПРАВЛЕНИЕ ФАЙЛАМИ =================
     def _refresh_files(self):
         for path in list(self.file_frames.keys()):
             if path not in self.selected_paths:
@@ -207,7 +212,6 @@ class TransferGUI:
             frame.destroy()
         self.file_frames.clear()
 
-    # ================= DRAG & DROP =================
     def _clean_path(self, raw):
         p = raw.strip()
         if p.startswith('{') and p.endswith('}'):
@@ -239,7 +243,6 @@ class TransferGUI:
             self._refresh_files()
             self.core._log(f"Добавлено {len(new_items)} элемент(ов) через перетаскивание.")
 
-    # ================= ОТПРАВКА =================
     def _send_paths(self):
         targets = self._get_selected_peers()
         if not targets:
@@ -259,7 +262,6 @@ class TransferGUI:
         else:
             messagebox.showwarning("Внимание", msg)
 
-    # ================= ФОНОВЫЕ ОПРОСЫ =================
     def _poll_logs(self):
         while not self.core.log_queue.empty():
             try:
