@@ -23,7 +23,7 @@
 
 Скачайте последнюю версию из раздела [Releases](https://github.com/ven1ck/p2p/releases/tag/release) на GitHub:
 
-- [Скачать .exe файл]([https://github.com/ven1ck/p2p/releases/tag/release](https://github.com/ven1ck/p2p/releases/download/release/OtpravochkaP2P.exe))
+- [Скачать .exe файл](https://github.com/ven1ck/p2p/releases/download/release/OtpravochkaP2P.exe)
 
 Запустите скачанный файл - установка не требуется.
 
